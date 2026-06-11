@@ -322,6 +322,13 @@ textarea.inp{resize:vertical;min-height:64px;line-height:1.6}
   min-width:0;
 }
 .stat-val:focus{border-color:var(--theme);outline:none}
+.stat-val-view{
+  width:100%;text-align:center;font-size:17px;font-weight:700;color:var(--ink);
+  padding:4px 2px;line-height:1.2;min-width:0;word-break:break-all;
+}
+.stat-empty{color:var(--ink-dim);font-weight:400}
+.stat-cell:not(.editing){cursor:pointer}
+.stat-cell:not(.editing):hover{border-color:var(--theme)}
 .stat-name-edit{
   width:100%;background:#0a0e13;color:var(--accent-2);
   border:2px solid var(--accent-2);border-radius:5px;
@@ -755,7 +762,7 @@ function buildCharPages(){
       <div class="page-head"><h2>NO.${c.id.slice(1)} ${esc(c.name)}</h2><span class="blink">▌</span></div>
       <div data-profile></div>
 
-      <div class="subhead">STATUS<span class="count">특별능력치는 이름을 더블클릭해 수정</span></div>
+      <div class="subhead">STATUS<span class="count" data-stats-ctrl></span></div>
       <div class="stats-grid" data-stats></div>
 
       <div class="subhead">특이사항<span class="count"><button class="btn sm primary" data-addnote>+ 추가</button></span></div>
@@ -860,31 +867,59 @@ function renderProfileEdit(page,c){
 }
 
 /* ---- 능력치 ---- */
+const statsEditing={}; // charId -> bool
 function renderStats(page,c){
-  const data=st(c.id);const grid=page.querySelector('[data-stats]');grid.innerHTML='';
+  const data=st(c.id);
+  const grid=page.querySelector('[data-stats]');grid.innerHTML='';
+  const ctrl=page.querySelector('[data-stats-ctrl]');
+  const editing=!!statsEditing[c.id];
+
+  if(ctrl){
+    ctrl.innerHTML = editing
+      ? '<button class="btn sm primary" data-stats-done>✓ 완료</button>'
+      : '<button class="btn sm" data-stats-edit>✏ 수정</button>';
+    const eb=ctrl.querySelector('[data-stats-edit]');
+    const db=ctrl.querySelector('[data-stats-done]');
+    if(eb) eb.addEventListener('click',()=>{statsEditing[c.id]=true;renderStats(page,c);});
+    if(db) db.addEventListener('click',()=>{statsEditing[c.id]=false;renderStats(page,c);scheduleSave();});
+  }
+
   data.statNames.forEach((nm,i)=>{
     const isSpecial=(i===8); // 특별능력치 슬롯만 이름 수정 가능
-    const cell=document.createElement('div');cell.className='stat-cell';
-    cell.innerHTML=`<span class="stat-name ${isSpecial?'editable':''}" title="${isSpecial?'더블클릭하여 이름 수정':''}">${esc(nm)}</span>
-      <input class="stat-val" value="${esc(data.statVals[i]||'')}" placeholder="-">`;
-    const valInp=cell.querySelector('.stat-val');
-    valInp.addEventListener('input',()=>{data.statVals[i]=valInp.value;scheduleSave();});
-    if(isSpecial){
-      const nameSpan=cell.querySelector('.stat-name');
-      nameSpan.addEventListener('dblclick',()=>{
-        const edit=document.createElement('input');
-        edit.className='stat-name-edit';edit.value=data.statNames[i];
-        nameSpan.replaceWith(edit);edit.focus();edit.select();
-        const commit=()=>{
-          const v=edit.value.trim()||'특별능력치';
-          data.statNames[i]=v;scheduleSave();renderStats(page,c);
-        };
-        edit.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();commit();}else if(ev.key==='Escape'){renderStats(page,c);}});
-        edit.addEventListener('blur',commit);
-      });
+    const cell=document.createElement('div');cell.className='stat-cell'+(editing?' editing':'');
+    const val=data.statVals[i]||'';
+    if(editing){
+      cell.innerHTML=`<span class="stat-name ${isSpecial?'editable':''}" title="${isSpecial?'더블클릭하여 이름 수정':''}">${esc(nm)}</span>
+        <input class="stat-val" value="${esc(val)}" placeholder="-">`;
+      const valInp=cell.querySelector('.stat-val');
+      valInp.addEventListener('input',()=>{data.statVals[i]=valInp.value;scheduleSave();});
+      if(isSpecial){
+        const nameSpan=cell.querySelector('.stat-name');
+        nameSpan.addEventListener('dblclick',()=>{
+          const edit=document.createElement('input');
+          edit.className='stat-name-edit';edit.value=data.statNames[i];
+          nameSpan.replaceWith(edit);edit.focus();edit.select();
+          const commit=()=>{
+            const v=edit.value.trim()||'특별능력치';
+            data.statNames[i]=v;scheduleSave();renderStats(page,c);
+          };
+          edit.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();commit();}else if(ev.key==='Escape'){renderStats(page,c);}});
+          edit.addEventListener('blur',commit);
+        });
+      }
+    } else {
+      cell.innerHTML=`<span class="stat-name">${esc(nm)}</span>
+        <span class="stat-val-view">${val!==''?esc(val):'<span class="stat-empty">-</span>'}</span>`;
     }
     grid.appendChild(cell);
   });
+
+  // 보기 모드에서 그리드 더블클릭 시 편집 진입
+  if(!editing){
+    grid.ondblclick=()=>{statsEditing[c.id]=true;renderStats(page,c);};
+  } else {
+    grid.ondblclick=null;
+  }
 }
 
 /* ---- 특이사항 ---- */
