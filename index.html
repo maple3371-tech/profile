@@ -227,6 +227,17 @@ textarea.inp{resize:vertical;min-height:64px;line-height:1.6}
   margin-bottom:8px;text-shadow:1px 1px 0 #05070a;letter-spacing:.5px;
 }
 .sv-block p{font-size:14px;line-height:1.75;color:var(--ink);word-break:break-word}
+.sc-gallery{
+  margin-top:16px;padding-top:14px;border-top:2px dashed var(--line);
+  padding-bottom:18px;
+}
+.sc-gallery-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;
+}
+.sc-gallery-head .sv-label{
+  font-family:'NeoDunggeunmo',sans-serif;font-size:14px;font-weight:700;color:var(--theme);
+  text-shadow:1px 1px 0 #05070a;letter-spacing:.5px;
+}
 .sv-hint{
   position:absolute;bottom:10px;right:14px;font-size:10px;color:var(--ink-dim);
   opacity:0;transition:opacity .15s;letter-spacing:.5px;
@@ -651,7 +662,7 @@ document.getElementById('tabs').addEventListener('click',e=>{
    ========================================================= */
 function newScenario(){
   return{id:'s'+Date.now()+Math.random().toString(36).slice(2,6),
-    title:'',cover:null,difficulty:0,genre:'',players:'',charList:'',overview:'',summary:''};
+    title:'',cover:null,difficulty:0,genre:'',players:'',charList:'',overview:'',summary:'',gallery:[]};
 }
 const scenarioList=document.getElementById('scenarioList');
 function renderScenarios(){
@@ -671,6 +682,7 @@ function scenarioEl(s){
 
 /* ----- 보기 모드: 작품 소개 페이지 ----- */
 function renderScenarioView(el,s){
+  if(!s.gallery)s.gallery=[];
   el.classList.add('view');
   const stars=`<span class="stars-view">${[1,2,3,4,5].map(i=>`<span class="star ${i<=s.difficulty?'on':''}">★</span>`).join('')}</span>`;
   const metaBits=[];
@@ -690,10 +702,38 @@ function renderScenarioView(el,s){
       ${s.overview?`<div class="sv-block"><div class="sv-label">개요</div><p>${esc(s.overview).replace(/\n/g,'<br>')}</p></div>`:''}
       ${s.summary?`<div class="sv-block"><div class="sv-label">서사 요약</div><p>${esc(s.summary).replace(/\n/g,'<br>')}</p></div>`:''}
     </div>`:''}
+    <div class="sc-gallery">
+      <div class="sc-gallery-head">
+        <span class="sv-label">시나리오 갤러리</span>
+        <button class="btn sm primary" data-sc-addgal>+ 사진 추가(여러장)</button>
+      </div>
+      <div class="gallery-wrap">
+        <div class="gstage" data-stage></div>
+        <button class="gnav left" data-gl>‹</button>
+        <button class="gnav right" data-gr>›</button>
+      </div>
+      <div class="gstrip" data-strip></div>
+    </div>
     <div class="sv-hint">더블클릭하여 수정</div>`;
+
+  // 본문/표지 영역 더블클릭 → 편집 진입 (갤러리 영역은 제외)
   el.addEventListener('dblclick',e=>{
+    if(e.target.closest('.sc-gallery')) return; // 갤러리 조작은 편집 진입 안 함
     if(e.target.closest('.cover-view') && s.cover){ openLightbox(s.cover); return; }
     s._editing=true; renderScenarios();
+  });
+
+  // 갤러리 렌더 + 사진 추가
+  renderGalleryInto(el, s.gallery, 'sc:'+s.id, ()=>scheduleSave());
+  el.querySelector('[data-sc-addgal]').addEventListener('click',ev=>{
+    ev.stopPropagation();
+    pickFile(true,urls=>{
+      const firstNew=s.gallery.length;
+      urls.forEach(u=>s.gallery.push({id:'g'+Date.now()+Math.random().toString(36).slice(2,5),img:u}));
+      galIndex['sc:'+s.id]=firstNew;
+      renderGalleryInto(el, s.gallery, 'sc:'+s.id, ()=>scheduleSave());
+      scheduleSave();
+    });
   });
 }
 
@@ -797,12 +837,10 @@ function bindCharPage(page,c){
     pickFile(true,urls=>{
       const firstNew=data.gallery.length;
       urls.forEach(u=>data.gallery.push({id:'g'+Date.now()+Math.random().toString(36).slice(2,5),img:u}));
-      galIndex[c.id]=firstNew; // 새로 추가한 첫 사진을 보여줌
+      galIndex['char:'+c.id]=firstNew; // 새로 추가한 첫 사진을 보여줌
       renderGallery(page,c);scheduleSave();
     });
   });
-  page.querySelector('[data-gl]').addEventListener('click',()=>moveGallery(c.id,-1));
-  page.querySelector('[data-gr]').addEventListener('click',()=>moveGallery(c.id,1));
 }
 
 /* ---- 프로필: 보기(생활기록부) / 편집 ---- */
@@ -953,79 +991,86 @@ function renderNotes(page,c){
   });
 }
 
-/* ---- 갤러리 캐러셀 (한 장씩 + 썸네일 드래그 정렬) ---- */
+/* ---- 갤러리 캐러셀 (범용: 한 장씩 + 썸네일 드래그 정렬) ---- */
 let dragSrc=null,dragData=null;
-const galIndex={}; // charId -> 현재 보고있는 인덱스
-function clampIndex(c){
-  const n=st(c).gallery.length;
-  let i=galIndex[c]||0;
-  if(i>=n)i=n-1; if(i<0)i=0;
-  galIndex[c]=i; return i;
-}
-function moveGallery(cid,dir){
-  const data=st(cid);if(!data.gallery.length)return;
-  let i=clampIndex(cid)+dir;
-  if(i<0)i=0; if(i>=data.gallery.length)i=data.gallery.length-1;
-  galIndex[cid]=i;
-  const page=document.getElementById('page-'+cid);
-  const c=CHARS.find(x=>x.id===cid);
-  renderGallery(page,c);
-}
-function renderGallery(page,c){
-  const data=st(c.id);
-  const stage=page.querySelector('[data-stage]');
-  const strip=page.querySelector('[data-strip]');
-  const navL=page.querySelector('[data-gl]'), navR=page.querySelector('[data-gr]');
+const galIndex={}; // key -> 현재 보고있는 인덱스
 
-  if(!data.gallery.length){
+/* container: data-stage/data-strip/data-gl/data-gr 를 가진 요소
+   list: 사진 배열 [{id,img}]
+   key: 인덱스 추적용 고유 키
+   onChange: 배열이 바뀌면 호출(저장) */
+function renderGalleryInto(container, list, key, onChange){
+  const stage=container.querySelector('[data-stage]');
+  const strip=container.querySelector('[data-strip]');
+  const navL=container.querySelector('[data-gl]'), navR=container.querySelector('[data-gr]');
+  const rerender=()=>renderGalleryInto(container,list,key,onChange);
+
+  if(!list.length){
     stage.innerHTML='<div class="gallery-empty" style="width:100%;border:none">갤러리가 비어 있습니다.<br>“+ 사진 추가”로 여러 장을 한 번에 올릴 수 있어요.</div>';
     strip.innerHTML=''; navL.style.display=navR.style.display='none';
     return;
   }
   navL.style.display=navR.style.display='';
-  const idx=clampIndex(c.id);
-  const cur=data.gallery[idx];
+  let idx=galIndex[key]||0; if(idx>=list.length)idx=list.length-1; if(idx<0)idx=0; galIndex[key]=idx;
+  const cur=list[idx];
 
-  // 스테이지 (한 장, contain → 세로로 길면 양옆 여백)
   stage.innerHTML=`
-    <span class="gcounter">${idx+1} / ${data.gallery.length}</span>
+    <span class="gcounter">${idx+1} / ${list.length}</span>
     <button class="gdel" title="이 사진 삭제">×</button>
     <img src="${cur.img}" alt="">`;
   stage.querySelector('img').addEventListener('click',()=>openLightbox(cur.img));
   stage.querySelector('.gdel').addEventListener('click',()=>{
     if(confirm('이 사진을 삭제할까요?')){
-      data.gallery=data.gallery.filter(x=>x.id!==cur.id);
-      if(galIndex[c.id]>=data.gallery.length)galIndex[c.id]=data.gallery.length-1;
-      renderGallery(page,c);scheduleSave();
+      const at=list.findIndex(x=>x.id===cur.id); if(at>=0)list.splice(at,1);
+      if(galIndex[key]>=list.length)galIndex[key]=list.length-1;
+      onChange&&onChange(); rerender();
     }
   });
   navL.disabled=(idx===0);
-  navR.disabled=(idx===data.gallery.length-1);
+  navR.disabled=(idx===list.length-1);
+  navL.onclick=()=>{if(galIndex[key]>0){galIndex[key]--;rerender();}};
+  navR.onclick=()=>{if(galIndex[key]<list.length-1){galIndex[key]++;rerender();}};
 
-  // 썸네일 스트립 (드래그 정렬 + 클릭 이동)
   strip.innerHTML='';
-  data.gallery.forEach((g,i)=>{
+  list.forEach((g,i)=>{
     const t=document.createElement('div');
     t.className='gtm'+(i===idx?' current':'');t.draggable=true;t.dataset.gid=g.id;
     t.innerHTML=`<img src="${g.img}"><span class="gtm-num">${i+1}</span>`;
-    t.addEventListener('click',()=>{galIndex[c.id]=i;renderGallery(page,c);});
-    t.addEventListener('dragstart',()=>{dragSrc=t;dragData=data;t.classList.add('dragging');});
+    t.addEventListener('click',()=>{galIndex[key]=i;rerender();});
+    t.addEventListener('dragstart',()=>{dragSrc=t;dragData=list;t.classList.add('dragging');});
     t.addEventListener('dragend',()=>{t.classList.remove('dragging');strip.querySelectorAll('.gtm').forEach(x=>x.classList.remove('over'));});
-    t.addEventListener('dragover',e=>{e.preventDefault();if(dragData!==data)return;if(t!==dragSrc)t.classList.add('over');});
+    t.addEventListener('dragover',e=>{e.preventDefault();if(dragData!==list)return;if(t!==dragSrc)t.classList.add('over');});
     t.addEventListener('dragleave',()=>t.classList.remove('over'));
     t.addEventListener('drop',e=>{
-      e.preventDefault();if(dragData!==data||t===dragSrc)return;
-      const from=data.gallery.findIndex(x=>x.id===dragSrc.dataset.gid);
-      const to=data.gallery.findIndex(x=>x.id===g.id);
-      const[m]=data.gallery.splice(from,1);data.gallery.splice(to,0,m);
-      galIndex[c.id]=to; // 옮긴 사진을 따라가서 보여줌
-      renderGallery(page,c);scheduleSave();
+      e.preventDefault();if(dragData!==list||t===dragSrc)return;
+      const from=list.findIndex(x=>x.id===dragSrc.dataset.gid);
+      const to=list.findIndex(x=>x.id===g.id);
+      const[m]=list.splice(from,1);list.splice(to,0,m);
+      galIndex[key]=to; onChange&&onChange(); rerender();
     });
     strip.appendChild(t);
   });
-  // 현재 썸네일이 보이도록 스크롤
   const curThumb=strip.children[idx];
   if(curThumb)curThumb.scrollIntoView({inline:'center',block:'nearest'});
+}
+
+/* 캐릭터 갤러리: 범용 함수 래핑 */
+function clampIndex(c){
+  const n=st(c).gallery.length;
+  let i=galIndex['char:'+c]||0;
+  if(i>=n)i=n-1; if(i<0)i=0;
+  galIndex['char:'+c]=i; return i;
+}
+function moveGallery(cid,dir){
+  const data=st(cid);if(!data.gallery.length)return;
+  let i=(galIndex['char:'+cid]||0)+dir;
+  if(i<0)i=0; if(i>=data.gallery.length)i=data.gallery.length-1;
+  galIndex['char:'+cid]=i;
+  renderGallery(document.getElementById('page-'+cid),CHARS.find(x=>x.id===cid));
+}
+function renderGallery(page,c){
+  const data=st(c.id);
+  renderGalleryInto(page, data.gallery, 'char:'+c.id, ()=>scheduleSave());
 }
 
 /* ---- 라이트박스 ---- */
@@ -1046,7 +1091,7 @@ function esc(s){return(s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;'
   const saved=await dbGet(KEY);
   if(saved){
     // 병합 (구조 보강)
-    STATE.scenarios=(saved.scenarios||[]).map(s=>({...s,_editing:false}));
+    STATE.scenarios=(saved.scenarios||[]).map(s=>({...s,_editing:false,gallery:s.gallery||[]}));
     CHARS.forEach(c=>{
       const s=saved.chars&&saved.chars[c.id];
       const blank=blankChar();
